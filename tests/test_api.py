@@ -41,3 +41,36 @@ def test_predict_invalid_state_returns_422(state):
 def test_predict_missing_state_returns_422():
     response = client.post("/predict", json={"env": "FrozenLake-v1"})
     assert response.status_code == 422
+
+
+def test_episode_plays_until_the_game_ends():
+    response = client.post("/episode", json={"env": "FrozenLake-v1", "seed": 42})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["terminated"] or body["truncated"]
+    assert body["total_reward"] == sum(step["reward"] for step in body["steps"])
+    for before, after in zip(body["steps"], body["steps"][1:]):
+        assert after["state"] == before["next_state"]
+
+
+def test_episode_with_the_same_seed_is_repeatable():
+    first = client.post("/episode", json={"env": "Taxi-v4", "seed": 7}).json()
+    second = client.post("/episode", json={"env": "Taxi-v4", "seed": 7}).json()
+    assert first == second
+
+
+def test_episode_uses_the_agents_best_actions():
+    body = client.post("/episode", json={"env": "Taxi-v4", "seed": 42}).json()
+    for step in body["steps"]:
+        answer = client.post("/predict", json={"env": "Taxi-v4", "state": step["state"]}).json()
+        assert step["action"] == answer["action"]
+
+
+def test_episode_unknown_game_returns_404():
+    response = client.post("/episode", json={"env": "Chess-v0"})
+    assert response.status_code == 404
+
+
+def test_episode_negative_seed_returns_422():
+    response = client.post("/episode", json={"env": "FrozenLake-v1", "seed": -1})
+    assert response.status_code == 422

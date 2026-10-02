@@ -1,7 +1,14 @@
 from fastapi import FastAPI, HTTPException
 
 from app.agents import load_agents
-from app.schemas import AgentInfo, PredictRequest, PredictResponse
+from app.episode import play_episode
+from app.schemas import (
+    AgentInfo,
+    EpisodeRequest,
+    EpisodeResponse,
+    PredictRequest,
+    PredictResponse,
+)
 
 app = FastAPI(
     title="RL Agents API",
@@ -34,16 +41,22 @@ def list_agents() -> list[AgentInfo]:
     ]
 
 
-@app.post("/predict")
-def predict(request: PredictRequest) -> PredictResponse:
-    """Return the trained agent's best action for a state."""
-    agent = AGENTS.get(request.env)
+def get_agent(env):
+    """Return the agent for a game, or answer 404 if there is none."""
+    agent = AGENTS.get(env)
     if agent is None:
         available = ", ".join(AGENTS)
         raise HTTPException(
             status_code=404,
-            detail=f"No agent for {request.env}. Available: {available}",
+            detail=f"No agent for {env}. Available: {available}",
         )
+    return agent
+
+
+@app.post("/predict")
+def predict(request: PredictRequest) -> PredictResponse:
+    """Return the trained agent's best action for a state."""
+    agent = get_agent(request.env)
     try:
         action = agent.best_action(request.state)
     except ValueError as error:
@@ -54,4 +67,19 @@ def predict(request: PredictRequest) -> PredictResponse:
         action=action,
         action_name=agent.action_names[action],
         q_values=agent.q_table[request.state].tolist(),
+    )
+
+
+@app.post("/episode")
+def episode(request: EpisodeRequest) -> EpisodeResponse:
+    """Let the trained agent play one full game and return every move."""
+    agent = get_agent(request.env)
+    steps, terminated, truncated = play_episode(agent, seed=request.seed)
+    return EpisodeResponse(
+        env=request.env,
+        seed=request.seed,
+        steps=steps,
+        total_reward=sum(step["reward"] for step in steps),
+        terminated=terminated,
+        truncated=truncated,
     )
